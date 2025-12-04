@@ -7,6 +7,30 @@
 .stack 100h
 .data
 
+    ; Renew book variables
+    renew_slot dw 0                  ; Slot to renew (1-based)
+    books_found_renew dw 0           ; Counter for found books
+
+    ; Renew book messages
+    unreturned_books_renew_msg db 'Your borrowed books:',0ah,'$'
+    no_books_to_renew_msg db 'No books to renew.',0ah,'Returning to Submenu...',0ah,0ah,'$'
+    slot_empty_renew_msg db 'Slot is empty! Cannot renew.',0ah,'Returning to Submenu...',0ah,0ah,'$'
+    renewing_book_msg db 'Renewing this book:',0ah,'$'
+    current_date_label db 'Current date borrowed: $'
+    by_separator db ' by $'
+
+    ; Read pagination variables
+    books_displayed dw 0             ; Books displayed on current page
+    total_books_found dw 0           ; Total occupied books found
+    total_pages_needed dw 0          ; Total pages needed
+
+    ; Read pagination messages
+    page_header_read db 'Page $'
+    page_of_msg_read db ' of $'
+    continue_prompt_read db 0ah,'Press any key for next page...',0ah,0ah,'$'
+    end_of_list_read_msg db 0ah,'End of book list.',0ah,'$'
+    total_books_msg db 'Total books: $'
+    books_found_msg db ' book(s)',0ah,0ah,'$'
     ; Return book variables
     return_slot dw 0                ; Slot to return (1-based)
     books_found dw 0                ; Counter for found books
@@ -1444,23 +1468,416 @@ mark_slot_occupied endp
 
 
 
+; ==================== RENEWAL FUNCTION ====================
 renew_book proc
-    ; TODO: Implement renew book functionality
+    ; Clear screen
+    mov ax, 0003h
+    int 10h
+    
+    ; Print renew header
     mov ah, 09h
     mov dx, offset renew_header
     int 21h
     
-    ; For now, just return to submenu
+    ; Check if user has any books to renew
+    call count_user_books
+    cmp ax, 0
+    je NoBooksToRenew
+    
+    ; Display occupied books only (similar to return function)
+    call display_occupied_books_for_renew
+    
+    ; Ask for book ID to renew
+    call get_book_to_renew
+    
+    ret
+    
+NoBooksToRenew:
+    ; No books to renew
+    mov ah, 09h
+    mov dx, offset no_books_to_renew_msg
+    int 21h
+    
+    ; Wait for key press
     mov ah, 09h
     mov dx, offset press_any_key
     int 21h
+    mov ah, 07h
+    int 21h
     
+    ; Return to submenu
+    call submenu_main
+    ret
+renew_book endp
+
+; ==================== DISPLAY OCCUPIED BOOKS FOR RENEW ====================
+; Display only occupied books with their details
+display_occupied_books_for_renew proc
+    ; Print instruction
+    mov ah, 09h
+    mov dx, offset unreturned_books_renew_msg
+    int 21h
+    
+    ; Initialize
+    mov cx, 10                    ; 10 slots total
+    mov bx, 1                     ; Slot number (1-based)
+    mov books_found_renew, 0      ; Counter for found books
+    
+DisplayOccupiedLoopRenew:
+    ; Save registers
+    push bx
+    push cx
+    
+    ; Check if slot is occupied
+    call check_slot_status        ; Input: BX = slot number (1-based)
+    cmp al, 1
+    jne NextSlotRenew             ; Skip if empty
+    
+    ; Slot is occupied - display it
+    inc books_found_renew         ; Increment found counter
+    
+    ; Display separator line
+    mov ah, 09h
+    mov dx, offset separator_line
+    int 21h
+    
+    ; Display "Slot X: "
+    mov ah, 09h
+    mov dx, offset slot_format
+    int 21h
+    
+    ; Display slot number
+    mov ax, bx
+    call display_number
+    
+    ; Display colon and space
+    mov ah, 02h
+    mov dl, ':'
+    int 21h
+    mov dl, ' '
+    int 21h
+    
+    ; Display book details
+    push bx
+    dec bx                       ; Convert to 0-based
+    mov book_id, bx              ; Store 0-based book ID
+    
+    ; Display title, author, and current date borrowed
+    call display_book_for_renew   ; Show title, author, and current date
+    
+    pop bx
+    
+    ; New line after book
+    mov ah, 09h
+    mov dx, offset newline
+    int 21h
+    
+NextSlotRenew:
+    ; Restore registers
+    pop cx
+    pop bx
+    
+    inc bx                       ; Next slot
+    loop DisplayOccupiedLoopRenew
+    
+    ; Display final separator
+    mov ah, 09h
+    mov dx, offset separator_line
+    int 21h
+    
+    ; If no books found
+    cmp books_found_renew, 0
+    je NoBooksFoundRenew
+    
+    ret
+    
+NoBooksFoundRenew:
+    ; This shouldn't happen, but just in case
+    mov ah, 09h
+    mov dx, offset no_books_to_renew_msg
+    int 21h
+    
+    ; Wait for key and return to submenu
+    mov ah, 09h
+    mov dx, offset press_any_key
+    int 21h
     mov ah, 07h
     int 21h
     
     call submenu_main
     ret
-renew_book endp
+display_occupied_books_for_renew endp
+
+; ==================== DISPLAY BOOK FOR RENEW ====================
+; Display title, author, and current date borrowed for renew view
+; Input: book_id = slot number (0-based)
+display_book_for_renew proc
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    
+    ; First display title and author
+    ; Calculate offset for title in title_array
+    mov ax, current_index
+    mov bx, 2500                  ; Bytes per user
+    mul bx
+    mov di, ax                   ; DI = user offset
+    
+    mov ax, book_id
+    mov bx, 250                  ; Bytes per book
+    mul bx
+    add di, ax                   ; DI = book offset
+    
+    ; Title field offset (field 1 = 50 bytes after start)
+    mov si, di
+    add si, 50                   ; Skip author field
+    add si, offset title_array   ; Add array base
+    
+    ; Display title
+    call print_string
+    
+    ; Display " by " separator
+    mov ah, 09h
+    mov dx, offset by_separator
+    int 21h
+    
+    ; Now display author
+    ; Calculate offset for author in author_array
+    mov si, di
+    add si, offset author_array   ; Add array base
+    
+    ; Display author
+    call print_string
+    
+    ; New line for date information
+    mov ah, 09h
+    mov dx, offset newline
+    int 21h
+    
+    ; Display current date borrowed
+    mov ah, 09h
+    mov dx, offset current_date_label
+    int 21h
+    
+    ; Calculate offset for date borrowed in date_borrow_array
+    ; Field 4 = 200 bytes after start (4 fields × 50 bytes)
+    mov si, di
+    add si, 200                  ; Skip to field 4 (date borrowed)
+    add si, offset date_borrow_array
+    
+    ; Display current date borrowed
+    call print_string
+    
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+display_book_for_renew endp
+
+; ==================== GET BOOK TO RENEW ====================
+; Ask user which book to renew
+get_book_to_renew proc
+    ; Print choose book prompt
+    mov ah, 09h
+    mov dx, offset enter_id_renew
+    int 21h
+    
+    ; Read slot number
+    mov dx, offset book_id_buffer
+    mov cx, 3                     ; Max 2 digits + enter
+    call read_string_3fh
+    
+    ; Convert to number
+    call parse_book_id
+    cmp ax, 1
+    jl InvalidBookIDRenew
+    cmp ax, 10
+    jg InvalidBookIDRenew
+    
+    ; Valid slot number (1-based)
+    mov renew_slot, ax          ; Store 1-based slot
+    
+    ; Check if slot is occupied
+    mov bx, ax                   ; BX = slot number (1-based)
+    call check_slot_status
+    cmp al, 1
+    jne SlotEmptyRenew
+    
+    ; Slot is occupied - get new date
+    call get_new_date_and_renew
+    ret
+    
+InvalidBookIDRenew:
+    ; Print error message
+    mov ah, 09h
+    mov dx, offset invalid_id
+    int 21h
+    
+    mov ah, 09h
+    mov dx, offset press_any_key
+    int 21h
+    mov ah, 07h
+    int 21h
+    
+    ; Return to submenu
+    call submenu_main
+    ret
+    
+SlotEmptyRenew:
+    ; Print error message
+    mov ah, 09h
+    mov dx, offset slot_empty_renew_msg
+    int 21h
+    
+    mov ah, 09h
+    mov dx, offset press_any_key
+    int 21h
+    mov ah, 07h
+    int 21h
+    
+    ; Return to submenu
+    call submenu_main
+    ret
+    
+get_book_to_renew endp
+
+; ==================== GET NEW DATE AND RENEW ====================
+; Get new date borrowed and update the book
+get_new_date_and_renew proc
+    ; Convert renew_slot to 0-based
+    mov ax, renew_slot
+    dec ax
+    mov book_id, ax              ; Store 0-based book ID
+    
+    ; Clear screen
+    mov ax, 0003h
+    int 10h
+    
+    ; Print renew header
+    mov ah, 09h
+    mov dx, offset renew_header
+    int 21h
+    
+    ; Display book being renewed
+    mov ah, 09h
+    mov dx, offset renewing_book_msg
+    int 21h
+    
+    ; Display slot number
+    mov ah, 09h
+    mov dx, offset slot_format
+    int 21h
+    
+    mov ax, renew_slot
+    call display_number
+    
+    mov ah, 02h
+    mov dl, ':'
+    int 21h
+    mov dl, ' '
+    int 21h
+    
+    ; Display book title and author
+    call display_book_for_renew
+    
+    ; Ask for new date
+    mov ah, 09h
+    mov dx, offset newline
+    int 21h
+    
+    mov ah, 09h
+    mov dx, offset new_date_borrowed
+    int 21h
+    
+    ; Read new date
+    mov dx, offset book_buffer
+    mov cx, MAX_BOOK_FIELD_LENGTH
+    call read_string_3fh
+    
+    ; Update date borrowed field
+    call update_date_borrowed
+    
+    ; Display success message
+    mov ah, 09h
+    mov dx, offset borrow_renewed
+    int 21h
+    
+    ; Wait for key press
+    mov ah, 09h
+    mov dx, offset press_any_key
+    int 21h
+    mov ah, 07h
+    int 21h
+    
+    ; Return to submenu
+    call submenu_main
+    ret
+get_new_date_and_renew endp
+
+; ==================== UPDATE DATE BORROWED ====================
+; Update the date borrowed field for the current book
+update_date_borrowed proc
+    push ax
+    push bx
+    push cx
+    push si
+    push di
+    
+    ; Calculate offset for date borrowed field
+    ; Total size per user = 10 books × 5 fields × 50 chars = 2500 bytes
+    mov ax, current_index
+    mov bx, 2500                  ; Bytes per user
+    mul bx
+    mov di, ax                   ; DI = user base offset
+    
+    ; Calculate book offset within user
+    mov ax, book_id              ; 0-based book ID
+    mov bx, 250                  ; Bytes per book
+    mul bx
+    add di, ax                   ; DI = book base offset
+    
+    ; Date borrowed is field 4 = 200 bytes offset (4 fields × 50 bytes)
+    add di, 200                  ; Skip to field 4
+    
+    ; Add date borrowed array base
+    add di, offset date_borrow_array
+    
+    ; Copy new date from book_buffer to array
+    mov si, offset book_buffer
+    
+CopyNewDateLoop:
+    mov al, [si]
+    cmp al, '$'
+    je CopyNewDateDone
+    cmp al, 0Dh                  ; Skip carriage return
+    je SkipDateChar
+    cmp al, 0Ah                  ; Skip line feed
+    je SkipDateChar
+    
+    mov [di], al
+    inc di
+    
+SkipDateChar:
+    inc si
+    jmp CopyNewDateLoop
+    
+CopyNewDateDone:
+    ; Terminate with '$'
+    mov byte ptr [di], '$'
+    
+    pop di
+    pop si
+    pop cx
+    pop bx
+    pop ax
+    ret
+update_date_borrowed endp
 
 ; ==================== RETURN BOOK FUNCTION ====================
 return_book proc
@@ -1975,46 +2392,118 @@ NotOccupied:
 count_user_books endp
 
 ; ==================== READ UNRETURNED BOOKS ====================
+; ==================== READ UNRETURNED BOOKS (ONLY OCCUPIED) ====================
 read_unreturned_books proc
     ; Clear screen
     mov ax, 0003h
     int 10h
     
+    ; Print header
+    mov ah, 09h
+    mov dx, offset read_header
+    int 21h
+    
+    ; Check if user has any books
+    call count_user_books
+    cmp ax, 0
+    je NoBooksToRead
+    
+    ; Display only occupied books
+    call display_occupied_books_for_read
+    
+    ret
+    
+NoBooksToRead:
+    ; No books borrowed
+    mov ah, 09h
+    mov dx, offset no_books_msg
+    int 21h
+    
+    ; Wait for key press
+    mov ah, 09h
+    mov dx, offset press_any_key
+    int 21h
+    mov ah, 07h
+    int 21h
+    
+    ; Return to submenu
+    call submenu_main
+    ret
+read_unreturned_books endp
+
+; ==================== DISPLAY OCCUPIED BOOKS FOR READ ====================
+; Display only occupied books with full details
+display_occupied_books_for_read proc
     ; Initialize pagination
     mov current_slot_display, 1      ; Start from slot 1
     mov current_page, 1              ; Start from page 1
-    mov slots_displayed, 0           ; Reset slots displayed counter
+    mov books_displayed, 0           ; Counter for books displayed
+    mov total_books_found, 0         ; Counter for total books found
     
-DisplayPage:
-    ; Print main header
+    ; First, count total occupied books
+    call count_user_books
+    mov total_books_found, ax
+    
+    ; Calculate total pages needed
+    mov ax, total_books_found
+    mov bx, 3                        ; 3 books per page
+    xor dx, dx
+    div bx                           ; AX = total_books / 3
+    cmp dx, 0                        ; Check remainder
+    je NoRemainder
+    inc ax                           ; Add extra page for remainder
+NoRemainder:
+    mov total_pages_needed, ax
+    
+DisplayPageRead:
+    ; Clear screen for new page
+    mov ax, 0003h
+    int 10h
+    
+    ; Print header with page info
     mov ah, 09h
     mov dx, offset read_header
     int 21h
     
     ; Display page number
     mov ah, 09h
-    mov dx, offset page_header
+    mov dx, offset page_header_read
     int 21h
     
     mov ax, current_page
     call display_number
     
     mov ah, 09h
-    mov dx, offset page_of_msg
+    mov dx, offset page_of_msg_read
     int 21h
     
-    ; Display up to 3 slots
-    mov cx, 3                        ; Maximum slots per page
+    mov ax, total_pages_needed
+    call display_number
     
-DisplaySlotsLoop:
-    ; Check if we've displayed all 10 slots
+    mov ah, 09h
+    mov dx, offset newline
+    int 21h
+    
+    ; Reset books displayed counter for this page
+    mov books_displayed, 0
+    
+    ; Start searching for occupied books from current slot
     mov bx, current_slot_display
-    cmp bx, 10
-    jg AllSlotsDisplayed
     
-    ; Save registers
+FindBooksForPage:
+    ; Check if we've checked all 10 slots
+    cmp bx, 10
+    jg PageComplete
+    
+    ; Check if slot is occupied
     push bx
-    push cx
+    call check_slot_status
+    pop bx
+    cmp al, 1
+    jne ContinueSearching
+    
+    ; Found an occupied book - display it
+    inc books_displayed
     
     ; Display separator line
     mov ah, 09h
@@ -2037,64 +2526,46 @@ DisplaySlotsLoop:
     mov dl, ' '
     int 21h
     
-    ; Check if slot is occupied
-    call check_slot_status        ; Input: BX = slot number (1-based)
-    cmp al, 1
-    je DisplayOccupiedSlotDetails
-    
-    ; Slot is empty
-    mov ah, 09h
-    mov dx, offset empty_msg
-    int 21h
-    
-    ; New line after empty slot
-    mov ah, 09h
-    mov dx, offset newline
-    int 21h
-    
-    jmp NextSlotComplete
-    
-DisplayOccupiedSlotDetails:
-    ; Slot is occupied - display all details
+    ; Display full book details
     push bx
     dec bx                       ; Convert to 0-based
     mov book_id, bx              ; Store 0-based book ID
     
     ; Display all book details
-    call display_all_book_details ; Display full book details
+    call display_all_book_details_read ; Display full book details
     
     pop bx
     
-NextSlotComplete:
-    ; Increment counters
-    inc current_slot_display
-    inc slots_displayed
-    
-    ; Restore registers
-    pop cx
-    pop bx
-    
-    ; Check if we've displayed 3 slots already
-    mov ax, slots_displayed
+    ; Check if we've displayed 3 books for this page
+    mov ax, books_displayed
     cmp ax, 3
-    je PauseForInput
+    je PageComplete
     
-    loop DisplaySlotsLoop
+ContinueSearching:
+    inc bx
+    jmp FindBooksForPage
     
-PauseForInput:
-    ; Check if we have more slots to display
-    mov bx, current_slot_display
-    cmp bx, 10
-    jg AllSlotsDisplayed
+PageComplete:
+    ; Update current_slot_display for next page
+    mov current_slot_display, bx
     
-    ; Display separator
+    ; Display final separator
     mov ah, 09h
     mov dx, offset separator_line
     int 21h
     
+    ; Check if we have more books to display
+    mov bx, current_slot_display
+    cmp bx, 10
+    jg AllBooksDisplayed
+    
+    ; Check if we found any books on this page
+    cmp books_displayed, 0
+    je AllBooksDisplayed          ; No books found, we're done
+    
     ; Display continue prompt
     mov ah, 09h
-    mov dx, offset continue_prompt
+    mov dx, offset continue_prompt_read
     int 21h
     
     ; Wait for any key press
@@ -2104,22 +2575,25 @@ PauseForInput:
     ; Increment page number
     inc current_page
     
-    ; Clear screen for next page
-    mov ax, 0003h
-    int 10h
-    
     ; Continue with next page
-    jmp DisplayPage
+    jmp DisplayPageRead
     
-AllSlotsDisplayed:
-    ; Display final separator
-    mov ah, 09h
-    mov dx, offset separator_line
-    int 21h
-    
+AllBooksDisplayed:
     ; Display completion message
     mov ah, 09h
-    mov dx, offset end_of_list_msg
+    mov dx, offset end_of_list_read_msg
+    int 21h
+    
+    ; Display book count
+    mov ah, 09h
+    mov dx, offset total_books_msg
+    int 21h
+    
+    mov ax, total_books_found
+    call display_number
+    
+    mov ah, 09h
+    mov dx, offset books_found_msg
     int 21h
     
     ; Wait for key press to return
@@ -2132,7 +2606,107 @@ AllSlotsDisplayed:
     ; Return to submenu
     call submenu_main
     ret
-read_unreturned_books endp
+display_occupied_books_for_read endp
+
+; ==================== DISPLAY ALL BOOK DETAILS FOR READ ====================
+; Display all details for a book (optimized for read view)
+; Input: book_id = slot number (0-based)
+display_all_book_details_read proc
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    
+    ; Set up field counter
+    mov current_field_counter, 0
+    
+DisplayFieldLoopRead:
+    ; Get the field based on current_field_counter
+    mov ax, current_field_counter
+    
+    cmp ax, 0
+    je DisplayAuthorRead
+    cmp ax, 1
+    je DisplayTitleRead
+    cmp ax, 2
+    je DisplayPublisherRead
+    cmp ax, 3
+    je DisplayDatePubRead
+    cmp ax, 4
+    je DisplayDateBorrowRead
+    jmp DisplayDoneRead
+    
+DisplayAuthorRead:
+    ; New line for first field
+    mov ah, 09h
+    mov dx, offset newline
+    int 21h
+    
+    ; Display author label
+    mov ah, 09h
+    mov dx, offset author_prompt
+    int 21h
+    call display_specific_field
+    jmp NextFieldRead
+    
+DisplayTitleRead:
+    ; Display title label
+    mov ah, 09h
+    mov dx, offset title_prompt
+    int 21h
+    call display_specific_field
+    jmp NextFieldRead
+    
+DisplayPublisherRead:
+    ; Display publisher label
+    mov ah, 09h
+    mov dx, offset publisher_prompt
+    int 21h
+    call display_specific_field
+    jmp NextFieldRead
+    
+DisplayDatePubRead:
+    ; Display date published label
+    mov ah, 09h
+    mov dx, offset date_published_prompt
+    int 21h
+    call display_specific_field
+    jmp NextFieldRead
+    
+DisplayDateBorrowRead:
+    ; Display date borrowed label
+    mov ah, 09h
+    mov dx, offset date_borrowed_prompt
+    int 21h
+    call display_specific_field
+    jmp DisplayDoneRead
+    
+NextFieldRead:
+    ; Move to next line
+    mov ah, 09h
+    mov dx, offset newline
+    int 21h
+    
+    ; Increment field counter
+    inc current_field_counter
+    jmp DisplayFieldLoopRead
+    
+DisplayDoneRead:
+    ; Add extra newline after book details
+    mov ah, 09h
+    mov dx, offset newline
+    int 21h
+    
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+display_all_book_details_read endp
 
 ; ==================== DISPLAY ALL BOOK DETAILS ====================
 ; Display all details for a book
