@@ -7,6 +7,18 @@
 .stack 100h
 .data
 
+    ; ==================== PAGINATION VARIABLES ====================
+    current_slot_display dw 1       ; Current slot being displayed (1-based)
+    current_page dw 1               ; Current page number
+    slots_displayed dw 0            ; How many slots displayed in current page
+
+    ; ==================== PAGINATION MESSAGES ====================
+    continue_prompt db 0ah,'Press any key for next page...',0ah,0ah,'$'
+    end_of_list_msg db 0ah,'End of book list.',0ah,0ah,'$'
+    page_header db 'Page $'
+    page_of_msg db ' of 4',0ah,'$'  ; 10 slots ÷ 3 per page ≈ 4 pages
+
+
     ; Add these after your existing messages
     borrow_menu_header db 'Available Slots:',0ah,'$'
     slot_format db '  Slot $'
@@ -1456,26 +1468,44 @@ return_book proc
     ret
 return_book endp
 
+; ==================== READ UNRETURNED BOOKS ====================
 read_unreturned_books proc
     ; Clear screen
     mov ax, 0003h
     int 10h
     
-    ; Print header
+    ; Initialize pagination
+    mov current_slot_display, 1      ; Start from slot 1
+    mov current_page, 1              ; Start from page 1
+    mov slots_displayed, 0           ; Reset slots displayed counter
+    
+DisplayPage:
+    ; Print main header
     mov ah, 09h
     mov dx, offset read_header
     int 21h
     
-    ; Check if user has any books
-    call count_user_books
-    cmp ax, 0
-    je NoBooksMessage
+    ; Display page number
+    mov ah, 09h
+    mov dx, offset page_header
+    int 21h
     
-    ; Display all 10 slots with details
-    mov cx, 10                    ; 10 slots total
-    mov bx, 1                     ; Slot number (1-based)
+    mov ax, current_page
+    call display_number
     
-DisplayAllSlotsLoop:
+    mov ah, 09h
+    mov dx, offset page_of_msg
+    int 21h
+    
+    ; Display up to 3 slots
+    mov cx, 3                        ; Maximum slots per page
+    
+DisplaySlotsLoop:
+    ; Check if we've displayed all 10 slots
+    mov bx, current_slot_display
+    cmp bx, 10
+    jg AllSlotsDisplayed
+    
     ; Save registers
     push bx
     push cx
@@ -1504,49 +1534,89 @@ DisplayAllSlotsLoop:
     ; Check if slot is occupied
     call check_slot_status        ; Input: BX = slot number (1-based)
     cmp al, 1
-    je DisplayOccupiedSlotCompact
+    je DisplayOccupiedSlotDetails
     
     ; Slot is empty
     mov ah, 09h
     mov dx, offset empty_msg
     int 21h
-    jmp NextSlotComplete
     
-DisplayOccupiedSlotCompact:
-    ; Slot is occupied - display all details in compact format
-    push bx
-    dec bx                       ; Convert to 0-based
-    mov book_id, bx              ; Store 0-based book ID
-    call display_book_details_compact ; Display all details separated by commas
-    pop bx
-    
-NextSlotComplete:
-    ; New line after each slot
+    ; New line after empty slot
     mov ah, 09h
     mov dx, offset newline
     int 21h
+    
+    jmp NextSlotComplete
+    
+DisplayOccupiedSlotDetails:
+    ; Slot is occupied - display all details
+    push bx
+    dec bx                       ; Convert to 0-based
+    mov book_id, bx              ; Store 0-based book ID
+    
+    ; Display all book details
+    call display_all_book_details ; Display full book details
+    
+    pop bx
+    
+NextSlotComplete:
+    ; Increment counters
+    inc current_slot_display
+    inc slots_displayed
     
     ; Restore registers
     pop cx
     pop bx
     
-    inc bx                       ; Next slot
-    loop DisplayAllSlotsLoop
+    ; Check if we've displayed 3 slots already
+    mov ax, slots_displayed
+    cmp ax, 3
+    je PauseForInput
     
-    jmp WaitForKeyPress
+    loop DisplaySlotsLoop
     
-NoBooksMessage:
+PauseForInput:
+    ; Check if we have more slots to display
+    mov bx, current_slot_display
+    cmp bx, 10
+    jg AllSlotsDisplayed
+    
+    ; Display separator
     mov ah, 09h
-    mov dx, offset no_books_msg
+    mov dx, offset separator_line
     int 21h
     
-WaitForKeyPress:
+    ; Display continue prompt
+    mov ah, 09h
+    mov dx, offset continue_prompt
+    int 21h
+    
+    ; Wait for any key press
+    mov ah, 07h
+    int 21h
+    
+    ; Increment page number
+    inc current_page
+    
+    ; Clear screen for next page
+    mov ax, 0003h
+    int 10h
+    
+    ; Continue with next page
+    jmp DisplayPage
+    
+AllSlotsDisplayed:
     ; Display final separator
     mov ah, 09h
     mov dx, offset separator_line
     int 21h
     
-    ; Wait for key press
+    ; Display completion message
+    mov ah, 09h
+    mov dx, offset end_of_list_msg
+    int 21h
+    
+    ; Wait for key press to return
     mov ah, 09h
     mov dx, offset press_any_key
     int 21h
@@ -1558,9 +1628,10 @@ WaitForKeyPress:
     ret
 read_unreturned_books endp
 
-; Display book details in compact format (comma separated)
+; ==================== DISPLAY ALL BOOK DETAILS ====================
+; Display all details for a book
 ; Input: book_id = slot number (0-based)
-display_book_details_compact proc
+display_all_book_details proc
     push ax
     push bx
     push cx
@@ -1571,27 +1642,83 @@ display_book_details_compact proc
     ; Reset field counter
     mov current_field_counter, 0
     
-DisplayCompactFieldLoop:
-    ; Get and display the field
-    call get_and_display_field_compact
+DisplayFieldLoop:
+    ; Get the field based on current_field_counter
+    mov ax, current_field_counter
     
-    ; Check if we've displayed all 5 fields
-    inc current_field_counter
-    cmp current_field_counter, 5
-    jl AddCommaSeparator
+    cmp ax, 0
+    je DisplayAuthor
+    cmp ax, 1
+    je DisplayTitle
+    cmp ax, 2
+    je DisplayPublisher
+    cmp ax, 3
+    je DisplayDatePub
+    cmp ax, 4
+    je DisplayDateBorrow
+    jmp DisplayDone
     
-    ; All fields displayed
-    jmp DisplayCompactDone
-    
-AddCommaSeparator:
-    ; Add comma and space between fields (except after last field)
+DisplayAuthor:
+    ; New line for first field
     mov ah, 09h
-    mov dx, offset comma          ; ", "
+    mov dx, offset newline
     int 21h
     
-    jmp DisplayCompactFieldLoop
+    ; Display author label
+    mov ah, 09h
+    mov dx, offset author_prompt
+    int 21h
+    call display_specific_field
+    jmp NextField
     
-DisplayCompactDone:
+DisplayTitle:
+    ; Display title label
+    mov ah, 09h
+    mov dx, offset title_prompt
+    int 21h
+    call display_specific_field
+    jmp NextField
+    
+DisplayPublisher:
+    ; Display publisher label
+    mov ah, 09h
+    mov dx, offset publisher_prompt
+    int 21h
+    call display_specific_field
+    jmp NextField
+    
+DisplayDatePub:
+    ; Display date published label
+    mov ah, 09h
+    mov dx, offset date_published_prompt
+    int 21h
+    call display_specific_field
+    jmp NextField
+    
+DisplayDateBorrow:
+    ; Display date borrowed label
+    mov ah, 09h
+    mov dx, offset date_borrowed_prompt
+    int 21h
+    call display_specific_field
+    jmp DisplayDone
+    
+NextField:
+    ; Move to next line
+    mov ah, 09h
+    mov dx, offset newline
+    int 21h
+    
+    ; Increment field counter
+    inc current_field_counter
+    jmp DisplayFieldLoop
+    
+DisplayDone:
+    ; Add extra newline after book details
+    mov ah, 09h
+    mov dx, offset newline
+    int 21h
+    
     pop di
     pop si
     pop dx
@@ -1599,10 +1726,12 @@ DisplayCompactDone:
     pop bx
     pop ax
     ret
-display_book_details_compact endp
+display_all_book_details endp
 
-; Get and display a specific field in compact format
-get_and_display_field_compact proc
+; ==================== DISPLAY SPECIFIC FIELD ====================
+; Display a specific field for the current book
+; Input: current_field_counter = which field to display
+display_specific_field proc
     push ax
     push bx
     push cx
@@ -1611,6 +1740,7 @@ get_and_display_field_compact proc
     push di
     
     ; Calculate base offset for user's books
+    ; Total size per user = 10 books × 5 fields × 50 chars = 2500 bytes
     mov ax, current_index
     mov bx, 2500                  ; Bytes per user
     mul bx
@@ -1631,38 +1761,35 @@ get_and_display_field_compact proc
     ; Determine which array to read from based on current_field_counter
     mov ax, current_field_counter
     cmp ax, 0
-    je CompactReadAuthor
+    je ReadFromAuthor
     cmp ax, 1
-    je CompactReadTitle
+    je ReadFromTitle
     cmp ax, 2
-    je CompactReadPublisher
+    je ReadFromPublisher
     cmp ax, 3
-    je CompactReadDatePub
+    je ReadFromDatePub
     ; Else read from date borrowed (field 4)
     
-CompactReadDateBorrow:
-    mov si, offset date_borrow_array
-    jmp CompactDisplayField
+ReadFromDateBorrow:
+    add di, offset date_borrow_array
+    jmp DisplayFieldData
     
-CompactReadAuthor:
-    mov si, offset author_array
-    jmp CompactDisplayField
+ReadFromAuthor:
+    add di, offset author_array
+    jmp DisplayFieldData
     
-CompactReadTitle:
-    mov si, offset title_array
-    jmp CompactDisplayField
+ReadFromTitle:
+    add di, offset title_array
+    jmp DisplayFieldData
     
-CompactReadPublisher:
-    mov si, offset publisher_array
-    jmp CompactDisplayField
+ReadFromPublisher:
+    add di, offset publisher_array
+    jmp DisplayFieldData
     
-CompactReadDatePub:
-    mov si, offset date_pub_array
+ReadFromDatePub:
+    add di, offset date_pub_array
     
-CompactDisplayField:
-    ; Add the base array address to DI
-    add di, si
-    
+DisplayFieldData:
     ; Display the field content
     mov si, di
     call print_string
@@ -1674,35 +1801,8 @@ CompactDisplayField:
     pop bx
     pop ax
     ret
-get_and_display_field_compact endp
+display_specific_field endp
 
-; Count how many books a user has borrowed
-; Returns: AX = count
-count_user_books proc
-    push cx
-    push si
-    
-    mov cx, MAX_BOOKS_PER_USER    ; 10 slots
-    mov ax, current_index
-    mov bx, MAX_BOOKS_PER_USER
-    mul bx                       ; AX = user_index * 10
-    mov si, offset book_status_array
-    add si, ax                   ; SI points to user's status array
-    
-    xor ax, ax                   ; Counter = 0
-    
-CountLoop:
-    cmp byte ptr [si], 1
-    jne NotOccupied
-    inc ax                       ; Increment count
-NotOccupied:
-    inc si
-    loop CountLoop
-    
-    pop si
-    pop cx
-    ret
-count_user_books endp
 ; Display a 1 or 2 digit number
 ; Input: AX = number to display (0-99)
 display_number proc
