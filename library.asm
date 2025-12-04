@@ -7,6 +7,18 @@
 .stack 100h
 .data
 
+    ; Return book variables
+    return_slot dw 0                ; Slot to return (1-based)
+    books_found dw 0                ; Counter for found books
+
+    ; Return book messages
+    unreturned_books_list_msg db 'Your borrowed books:',0ah,'$'
+    no_books_to_return_msg db 'No books to return.',0ah,'Returning to Submenu...',0ah,0ah,'$'
+    slot_empty_return_msg db 'Slot is empty! Cannot return.',0ah,'Returning to Submenu...',0ah,0ah,'$'
+    returning_book_msg db 'Returning this book:',0ah,'$'
+    confirm_return_msg db 0ah,'Confirm return? (Y/N): $'
+    return_cancelled_msg db 'Return cancelled.',0ah,'Returning to Submenu...',0ah,0ah,'$'
+
     ; ==================== PAGINATION VARIABLES ====================
     current_slot_display dw 1       ; Current slot being displayed (1-based)
     current_page dw 1               ; Current page number
@@ -1450,23 +1462,517 @@ renew_book proc
     ret
 renew_book endp
 
+; ==================== RETURN BOOK FUNCTION ====================
 return_book proc
-    ; TODO: Implement return book functionality
+    ; Clear screen
+    mov ax, 0003h
+    int 10h
+    
+    ; Print return header
     mov ah, 09h
     mov dx, offset return_header
     int 21h
     
-    ; For now, just return to submenu
+    ; Check if user has any books to return
+    call count_user_books
+    cmp ax, 0
+    je NoBooksToReturn
+    
+    ; Display occupied books only
+    call display_occupied_books_for_return
+    
+    ; Ask for book ID to return
+    call get_book_to_return
+    
+    ret
+    
+NoBooksToReturn:
+    ; No books to return
+    mov ah, 09h
+    mov dx, offset no_books_to_return_msg
+    int 21h
+    
+    ; Wait for key press
     mov ah, 09h
     mov dx, offset press_any_key
     int 21h
+    mov ah, 07h
+    int 21h
     
+    ; Return to submenu
+    call submenu_main
+    ret
+return_book endp
+
+; ==================== DISPLAY OCCUPIED BOOKS FOR RETURN ====================
+; Display only occupied books with their details
+display_occupied_books_for_return proc
+    ; Print instruction
+    mov ah, 09h
+    mov dx, offset unreturned_books_list_msg
+    int 21h
+    
+    ; Initialize
+    mov cx, 10                    ; 10 slots total
+    mov bx, 1                     ; Slot number (1-based)
+    mov books_found, 0            ; Counter for found books
+    
+DisplayOccupiedLoop:
+    ; Save registers
+    push bx
+    push cx
+    
+    ; Check if slot is occupied
+    call check_slot_status        ; Input: BX = slot number (1-based)
+    cmp al, 1
+    jne NextSlotReturn            ; Skip if empty
+    
+    ; Slot is occupied - display it
+    inc books_found               ; Increment found counter
+    
+    ; Display separator line
+    mov ah, 09h
+    mov dx, offset separator_line
+    int 21h
+    
+    ; Display "Slot X: "
+    mov ah, 09h
+    mov dx, offset slot_format
+    int 21h
+    
+    ; Display slot number
+    mov ax, bx
+    call display_number
+    
+    ; Display colon and space
+    mov ah, 02h
+    mov dl, ':'
+    int 21h
+    mov dl, ' '
+    int 21h
+    
+    ; Display book details
+    push bx
+    dec bx                       ; Convert to 0-based
+    mov book_id, bx              ; Store 0-based book ID
+    
+    ; Display title and author (brief info)
+    call display_book_brief_info  ; Show title and author only
+    
+    pop bx
+    
+    ; New line after book
+    mov ah, 09h
+    mov dx, offset newline
+    int 21h
+    
+NextSlotReturn:
+    ; Restore registers
+    pop cx
+    pop bx
+    
+    inc bx                       ; Next slot
+    loop DisplayOccupiedLoop
+    
+    ; Display final separator
+    mov ah, 09h
+    mov dx, offset separator_line
+    int 21h
+    
+    ; If no books found (shouldn't happen since we checked earlier)
+    cmp books_found, 0
+    je NoBooksFoundReturn
+    
+    ret
+    
+NoBooksFoundReturn:
+    ; This shouldn't happen, but just in case
+    mov ah, 09h
+    mov dx, offset no_books_to_return_msg
+    int 21h
+    
+    ; Wait for key and return to submenu
+    mov ah, 09h
+    mov dx, offset press_any_key
+    int 21h
     mov ah, 07h
     int 21h
     
     call submenu_main
     ret
-return_book endp
+display_occupied_books_for_return endp
+
+; ==================== DISPLAY BOOK BRIEF INFO ====================
+; Display only title and author for occupied book
+; Input: book_id = slot number (0-based)
+display_book_brief_info proc
+    push ax
+    push bx
+    push cx
+    push dx
+    push si
+    push di
+    
+    ; First display title
+    ; Calculate offset for title in title_array
+    ; offset = (user_index * 2500) + (book_id * 250) + 50
+    mov ax, current_index
+    mov bx, 2500                  ; Bytes per user
+    mul bx
+    mov di, ax                   ; DI = user offset
+    
+    mov ax, book_id
+    mov bx, 250                  ; Bytes per book
+    mul bx
+    add di, ax                   ; DI = book offset
+    
+    ; Title field offset (field 1 = 50 bytes after start)
+    add di, 50                   ; Skip author field
+    add di, offset title_array   ; Add array base
+    
+    ; Display title label
+    mov ah, 09h
+    mov dx, offset title_prompt
+    int 21h
+    
+    ; Display the title
+    mov si, di
+    call print_string
+    
+    ; Display comma separator
+    mov ah, 09h
+    mov dx, offset comma
+    int 21h
+    
+    ; Now display author
+    ; Calculate offset for author in author_array
+    ; offset = (user_index * 2500) + (book_id * 250)
+    mov ax, current_index
+    mov bx, 2500                  ; Bytes per user
+    mul bx
+    mov di, ax                   ; DI = user offset
+    
+    mov ax, book_id
+    mov bx, 250                  ; Bytes per book
+    mul bx
+    add di, ax                   ; DI = book offset
+    
+    add di, offset author_array   ; Add array base
+    
+    ; Display author label
+    mov ah, 09h
+    mov dx, offset author_prompt
+    int 21h
+    
+    ; Display the author
+    mov si, di
+    call print_string
+    
+    pop di
+    pop si
+    pop dx
+    pop cx
+    pop bx
+    pop ax
+    ret
+display_book_brief_info endp
+
+; ==================== GET BOOK TO RETURN ====================
+; Ask user which book to return
+get_book_to_return proc
+    ; Print choose book prompt
+    mov ah, 09h
+    mov dx, offset enter_id_return
+    int 21h
+    
+    ; Read slot number
+    mov dx, offset book_id_buffer
+    mov cx, 3                     ; Max 2 digits + enter
+    call read_string_3fh
+    
+    ; Convert to number
+    call parse_book_id
+    cmp ax, 1
+    jl InvalidBookIDReturn
+    cmp ax, 10
+    jg InvalidBookIDReturn
+    
+    ; Valid slot number (1-based)
+    mov return_slot, ax          ; Store 1-based slot
+    
+    ; Check if slot is occupied
+    mov bx, ax                   ; BX = slot number (1-based)
+    call check_slot_status
+    cmp al, 1
+    jne SlotEmptyReturn
+    
+    ; Slot is occupied - confirm return
+    call confirm_and_return_book
+    ret
+    
+InvalidBookIDReturn:
+    ; Print error message
+    mov ah, 09h
+    mov dx, offset invalid_id
+    int 21h
+    
+    mov ah, 09h
+    mov dx, offset press_any_key
+    int 21h
+    mov ah, 07h
+    int 21h
+    
+    ; Return to submenu
+    call submenu_main
+    ret
+    
+SlotEmptyReturn:
+    ; Print error message
+    mov ah, 09h
+    mov dx, offset slot_empty_return_msg
+    int 21h
+    
+    mov ah, 09h
+    mov dx, offset press_any_key
+    int 21h
+    mov ah, 07h
+    int 21h
+    
+    ; Return to submenu
+    call submenu_main
+    ret
+    
+get_book_to_return endp
+
+; ==================== CONFIRM AND RETURN BOOK ====================
+; Confirm return and clear book data
+confirm_and_return_book proc
+    ; Convert return_slot to 0-based
+    mov ax, return_slot
+    dec ax
+    mov book_id, ax              ; Store 0-based book ID
+    
+    ; Display book being returned
+    mov ax, 0003h
+    int 10h
+    
+    mov ah, 09h
+    mov dx, offset return_header
+    int 21h
+    
+    mov ah, 09h
+    mov dx, offset returning_book_msg
+    int 21h
+    
+    ; Display slot number
+    mov ah, 09h
+    mov dx, offset slot_format
+    int 21h
+    
+    mov ax, return_slot
+    call display_number
+    
+    mov ah, 02h
+    mov dl, ':'
+    int 21h
+    mov dl, ' '
+    int 21h
+    
+    ; Display book details
+    call display_all_book_details
+    
+    ; Ask for confirmation
+    mov ah, 09h
+    mov dx, offset confirm_return_msg
+    int 21h
+    
+    ; Get confirmation (Y/N)
+    mov ah, 01h
+    int 21h
+    
+    ; Handle new line
+    push ax
+    mov ah, 02h
+    mov dl, 0ah
+    int 21h
+    pop ax
+    
+    ; Check response
+    cmp al, 'Y'
+    je DoReturnBook
+    cmp al, 'y'
+    je DoReturnBook
+    
+    ; User cancelled
+    mov ah, 09h
+    mov dx, offset return_cancelled_msg
+    int 21h
+    
+    mov ah, 09h
+    mov dx, offset press_any_key
+    int 21h
+    mov ah, 07h
+    int 21h
+    
+    ; Return to submenu
+    call submenu_main
+    ret
+    
+DoReturnBook:
+    ; Clear book data from arrays
+    call clear_book_data
+    
+    ; Mark slot as empty
+    call mark_slot_empty
+    
+    ; Display success message
+    mov ah, 09h
+    mov dx, offset book_returned
+    int 21h
+    
+    ; Wait for key press
+    mov ah, 09h
+    mov dx, offset press_any_key
+    int 21h
+    mov ah, 07h
+    int 21h
+    
+    ; Return to submenu
+    call submenu_main
+    ret
+confirm_and_return_book endp
+
+; ==================== CLEAR BOOK DATA ====================
+; Clear all book data for the specified slot
+clear_book_data proc
+    push ax
+    push bx
+    push cx
+    push si
+    push di
+    
+    ; Calculate base offset for user's books
+    mov ax, current_index
+    mov bx, 2500                  ; Bytes per user
+    mul bx
+    mov di, ax                   ; DI = user base offset
+    
+    ; Calculate book offset within user
+    mov ax, book_id              ; 0-based book ID
+    mov bx, 250                  ; Bytes per book
+    mul bx
+    add di, ax                   ; DI = book base offset
+    
+    ; Clear all 5 fields (250 bytes)
+    mov cx, 250                  ; Total bytes to clear
+    
+    ; Clear author array
+    mov si, offset author_array
+    add si, di
+    call clear_field_memory
+    
+    ; Clear title array
+    mov si, offset title_array
+    add si, di
+    call clear_field_memory
+    
+    ; Clear publisher array
+    mov si, offset publisher_array
+    add si, di
+    call clear_field_memory
+    
+    ; Clear date published array
+    mov si, offset date_pub_array
+    add si, di
+    call clear_field_memory
+    
+    ; Clear date borrowed array
+    mov si, offset date_borrow_array
+    add si, di
+    call clear_field_memory
+    
+    pop di
+    pop si
+    pop cx
+    pop bx
+    pop ax
+    ret
+clear_book_data endp
+
+; ==================== CLEAR FIELD MEMORY ====================
+; Clear 250 bytes of memory starting at SI
+clear_field_memory proc
+    push ax
+    push cx
+    push di
+    
+    mov di, si
+    mov cx, 250                  ; Clear 250 bytes (5 fields × 50 chars)
+    mov al, '$'                  ; Fill with string terminators
+    
+ClearLoop:
+    mov [di], al
+    inc di
+    loop ClearLoop
+    
+    pop di
+    pop cx
+    pop ax
+    ret
+clear_field_memory endp
+
+; ==================== MARK SLOT EMPTY ====================
+; Mark current slot as empty in status array
+mark_slot_empty proc
+    push ax
+    push bx
+    push si
+    
+    ; Calculate offset: (user_index * 10) + book_slot
+    mov ax, current_index
+    mov bx, 10                    ; MAX_BOOKS_PER_USER
+    mul bx
+    add ax, book_id              ; book_id is 0-based
+    
+    mov si, offset book_status_array
+    add si, ax
+    
+    mov byte ptr [si], 0        ; Mark as empty
+    
+    pop si
+    pop bx
+    pop ax
+    ret
+mark_slot_empty endp
+
+; ==================== COUNT USER BOOKS ====================
+; Count how many books a user has borrowed
+; Returns: AX = count
+count_user_books proc
+    push cx
+    push si
+    
+    mov cx, MAX_BOOKS_PER_USER
+    mov ax, current_index
+    mov bx, MAX_BOOKS_PER_USER
+    mul bx
+    mov si, offset book_status_array
+    add si, ax                  ; SI points to user's status array
+    
+    xor ax, ax                  ; Counter
+    
+CountLoop:
+    cmp byte ptr [si], 1
+    jne NotOccupied
+    inc ax
+NotOccupied:
+    inc si
+    loop CountLoop
+    
+    pop si
+    pop cx
+    ret
+count_user_books endp
 
 ; ==================== READ UNRETURNED BOOKS ====================
 read_unreturned_books proc
