@@ -61,7 +61,7 @@
     occupied_msg db ': [OCCUPIED] $'
     empty_msg db ': [EMPTY] $'
     choose_slot_msg db 0ah,'Choose slot to borrow (1-10): $'
-    invalid_slot_msg db 'Invalid slot! Must be 1-10.',0ah,'$'
+    invalid_slot_msg db 'Invalid slot! Must be 1-10. Returning to Submenu...',0ah,'$'
     book_details_prompt db 0ah,'Enter book details:',0ah,'$'
 
     current_field_counter dw 0      ; For tracking which book field we're storing
@@ -215,6 +215,21 @@ main_menu endp
 ; put functions here
 print_header proc
     call clear
+
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 1Fh
+    mov bh, 0
+    mov cx, 400
+    int 10h
+
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 4Eh
+    mov bh, 0
+    mov cx, 320
+    int 10h
+
     mov ah, 09h
     mov dx, offset programmer
     int 21h
@@ -248,20 +263,48 @@ print_main_menu proc
     ; Print header
     call print_header
     
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 1Fh
+    mov bh, 0
+    mov cx, 2400
+    int 10h
+
     ; Print main menu title
     mov ah, 09h
     mov dx, offset mainmenu
     int 21h
     
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 31h
+    mov bh, 0
+    mov cx, 8
+    int 10h
+
     ; Print menu options
     mov ah, 09h
     mov dx, offset option1
     int 21h
     
     mov ah, 09h
+    mov al, ' '
+    mov bl, 70h
+    mov bh, 0
+    mov cx, 21
+    int 10h
+
+    mov ah, 09h
     mov dx, offset option2
     int 21h
     
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 04h
+    mov bh, 0
+    mov cx, 7
+    int 10h
+
     mov ah, 09h
     mov dx, offset option3
     int 21h
@@ -321,6 +364,14 @@ login proc
     mov ax, 0003h
     int 10h
     
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 31h
+    mov bh, 0
+    mov cx, 2400
+    int 10h
+
+
     ; Print login header
     mov ah, 09h
     mov dx, offset login_header
@@ -578,6 +629,13 @@ create_account proc
     mov ax, 0003h
     int 10h
     
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 70h
+    mov bh, 0
+    mov cx, 2400
+    int 10h
+
     ; Print create account header
     mov ah, 09h
     mov dx, offset create_acc_header
@@ -860,6 +918,13 @@ print_submenu proc
     mov ax, 0003h
     int 10h
     
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 1Fh
+    mov bh, 0
+    mov cx, 2400
+    int 10h
+
     ; Print welcome message with username
     mov ah, 09h
     mov dx, offset welcome_msg
@@ -894,23 +959,58 @@ SkipUsername:
     mov dx, offset submenu_header
     int 21h
     
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 31h
+    mov bh, 0
+    mov cx, 9
+    int 10h
+
     ; Print submenu options
     mov ah, 09h
     mov dx, offset sub_option1
     int 21h
     
     mov ah, 09h
+    mov al, ' '
+    mov bl, 70h
+    mov bh, 0
+    mov cx, 10
+    int 10h
+
+    mov ah, 09h
     mov dx, offset sub_option2
     int 21h
     
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 5Eh
+    mov bh, 0
+    mov cx, 9
+    int 10h
+
     mov ah, 09h
     mov dx, offset sub_option3
     int 21h
     
     mov ah, 09h
+    mov al, ' '
+    mov bl, 20h
+    mov bh, 0
+    mov cx, 11
+    int 10h
+
+    mov ah, 09h
     mov dx, offset sub_option4
     int 21h
     
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 04h
+    mov bh, 0
+    mov cx, 10
+    int 10h
+
     mov ah, 09h
     mov dx, offset sub_option5
     int 21h
@@ -1014,6 +1114,13 @@ borrow_book proc
     mov ax, 0003h
     int 10h
     
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 31h
+    mov bh, 0
+    mov cx, 2400
+    int 10h
+
     ; Print borrow header
     mov ah, 09h
     mov dx, offset borrow_header
@@ -1030,14 +1137,6 @@ borrow_book endp
 
 ; Display simple slot status (just slot numbers and empty/occupied)
 display_simple_slot_status proc
-    ; Clear screen
-    mov ax, 0003h
-    int 10h
-    
-    ; Print header
-    mov ah, 09h
-    mov dx, offset borrow_header
-    int 21h
     
     ; Print slots header
     mov ah, 09h
@@ -1210,8 +1309,7 @@ InvalidSlot:
     int 21h
     
     ; Return to borrow menu
-    call display_simple_slot_status
-    call get_slot_choice
+    call submenu_main
     ret
     
 SlotOccupiedError:
@@ -1227,8 +1325,7 @@ SlotOccupiedError:
     int 21h
     
     ; Return to borrow menu
-    call display_simple_slot_status
-    call get_slot_choice
+    call submenu_main
     ret
     
 get_slot_choice endp
@@ -1474,6 +1571,13 @@ renew_book proc
     mov ax, 0003h
     int 10h
     
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 70h
+    mov bh, 0
+    mov cx, 2400
+    int 10h
+
     ; Print renew header
     mov ah, 09h
     mov dx, offset renew_header
@@ -1759,6 +1863,13 @@ get_new_date_and_renew proc
     mov ax, 0003h
     int 10h
     
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 70h
+    mov bh, 0
+    mov cx, 2400
+    int 10h
+    
     ; Print renew header
     mov ah, 09h
     mov dx, offset renew_header
@@ -1885,6 +1996,13 @@ return_book proc
     mov ax, 0003h
     int 10h
     
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 5Eh
+    mov bh, 0
+    mov cx, 2400
+    int 10h
+
     ; Print return header
     mov ah, 09h
     mov dx, offset return_header
@@ -2174,6 +2292,13 @@ confirm_and_return_book proc
     int 10h
     
     mov ah, 09h
+    mov al, ' '
+    mov bl, 5Eh
+    mov bh, 0
+    mov cx, 2400
+    int 10h
+
+    mov ah, 09h
     mov dx, offset return_header
     int 21h
     
@@ -2391,13 +2516,19 @@ NotOccupied:
     ret
 count_user_books endp
 
-; ==================== READ UNRETURNED BOOKS ====================
 ; ==================== READ UNRETURNED BOOKS (ONLY OCCUPIED) ====================
 read_unreturned_books proc
     ; Clear screen
     mov ax, 0003h
     int 10h
     
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 20h
+    mov bh, 0
+    mov cx, 2400
+    int 10h
+
     ; Print header
     mov ah, 09h
     mov dx, offset read_header
@@ -2434,6 +2565,7 @@ read_unreturned_books endp
 ; ==================== DISPLAY OCCUPIED BOOKS FOR READ ====================
 ; Display only occupied books with full details
 display_occupied_books_for_read proc
+
     ; Initialize pagination
     mov current_slot_display, 1      ; Start from slot 1
     mov current_page, 1              ; Start from page 1
@@ -2446,9 +2578,9 @@ display_occupied_books_for_read proc
     
     ; Calculate total pages needed
     mov ax, total_books_found
-    mov bx, 3                        ; 3 books per page
+    mov bx, 2                        ; 2 books per page
     xor dx, dx
-    div bx                           ; AX = total_books / 3
+    div bx                           ; AX = total_books / 2 
     cmp dx, 0                        ; Check remainder
     je NoRemainder
     inc ax                           ; Add extra page for remainder
@@ -2459,7 +2591,17 @@ DisplayPageRead:
     ; Clear screen for new page
     mov ax, 0003h
     int 10h
-    
+    push cx
+    push bx 
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 20h
+    mov bh, 0
+    mov cx, 2400
+    int 10h
+
+    pop bx
+    pop cx
     ; Print header with page info
     mov ah, 09h
     mov dx, offset read_header
@@ -2536,9 +2678,9 @@ FindBooksForPage:
     
     pop bx
     
-    ; Check if we've displayed 3 books for this page
+    ; Check if we've displayed 2 books for this page
     mov ax, books_displayed
-    cmp ax, 3
+    cmp ax, 2
     je PageComplete
     
 ContinueSearching:
@@ -2547,6 +2689,7 @@ ContinueSearching:
     
 PageComplete:
     ; Update current_slot_display for next page
+    inc bx
     mov current_slot_display, bx
     
     ; Display final separator
@@ -2962,6 +3105,13 @@ get_book_details_for_slot proc
     mov ax, 0003h
     int 10h
     
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 31h
+    mov bh, 0
+    mov cx, 2400
+    int 10h
+
     ; Print header
     mov ah, 09h
     mov dx, offset borrow_header
@@ -3047,6 +3197,16 @@ get_book_details_for_slot endp
 
 exit_program proc
     ; Exit function implementation here
+    mov ah, 09h
+    mov al, ' '
+    mov bl, 14h
+    mov bh, 0
+    mov cx, 2400
+    int 10h
+
+    mov ah, 09h
+    lea dx, exit_msg
+    int 21h 
     ret
 exit_program endp
 
