@@ -2696,6 +2696,10 @@ PageComplete:
     mov ah, 09h
     mov dx, offset separator_line
     int 21h
+
+    mov bx, books_displayed
+    cmp bx, total_books_found
+    je AllBooksDisplayed
     
     ; Check if we have more books to display
     mov bx, current_slot_display
