@@ -1,7 +1,8 @@
-; Filename: FINAl-PROJECT.ASM
+; Program Name: Library Borrowing System
+; Description: A library system that allows users to borrow, renew, return, and read books. 
+; making sure that each user can only borrow up to 10 books.
 ; Programmer Name: JOHN PRINCE ALONTE
-; Date: November 28, 2025
-; Description: Library Borrowing System
+; Date: Dec 13, 2025
 
 .model small
 .stack 100h
